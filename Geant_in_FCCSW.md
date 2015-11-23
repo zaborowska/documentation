@@ -120,3 +120,11 @@ For each execution of the algorithm an EDM MCParticleCollection is translated in
 
 At the same time the ParticleCollection is created so that the association between MCParticle and Particle in EDM can be preserved. ParticleCollection will be the collection of the so-called 'reconstructed' particles. 'Reconstructed' in this case means the particles have undergone simulation process and the resulting changes to the momentum are taken into account. It does not involve any reconstruction process.
 
+
+
+4. Smearing
+----
+
+In case of running the simulation with simtype=='fast', user can define a smearing tool that should be used.
+
+Smearing is performed using the GAUDI tool derived from ISmearingTool. User may specify how to smear a vector (CLHEP::ThreeVector) or a scalar (double). Currently there is only one implementation of a smearing tool called SimpleSmear (GeantSim/GeantComponents/src/SimpleSmear.h). The momentum/energy are smeared by multiplying Gaussian distribution with the mean $\mu=1$ and the standard deviation $\sigma$ as specified in the tool properties (default: 0.01).
