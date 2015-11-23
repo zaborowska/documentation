@@ -8,26 +8,25 @@ To run full simulation:
     ./run gaudirun.py config/geant_fullsim.py
 
 The configuration file (config/geant_fullsim.py) contains:
-
-    * reading an event saved in a HepMC file
+  * reading an event saved in a HepMC file
 
             reader = HepMCReader("Reader", Filename="example_MyPythia.dat")
             reader.Outputs.hepmc.Path = "hepmc"
 
-    * translating a HepMC event to the EDM
-    
+  * translating a HepMC event to the EDM
+   
             from Configurables import HepMCConverter
             hepmc_converter = HepMCConverter("Converter")
             hepmc_converter.Inputs.hepmc.Path="hepmc"
             hepmc_converter.Outputs.genparticles.Path="all_genparticles"
             hepmc_converter.Outputs.genvertices.Path="all_genvertices"
 
-    * construction of geometry using DD4hep
+  * construction of geometry using DD4hep
 
             from Configurables import GeoSvc
             geoservice = GeoSvc("GeoSvc", OutputLevel = VERBOSE)
 
-    * simulation with Geant
+  * simulation with Geant
 
             from Configurables import Geant4Simulation
             geant4simulation = Geant4Simulation("Geant4Simulation", simtype="full")
@@ -35,7 +34,7 @@ The configuration file (config/geant_fullsim.py) contains:
             geant4simulation.Outputs.particles.Path = "recparticles"
             geant4simulation.Outputs.particleassociation.Path = "particleMCparticle"
 
-    * saving the output
+  * saving the output
 
             from Configurables import AlbersWrite, AlbersOutput
             out = AlbersOutput("out", OutputLevel=DEBUG)
@@ -49,20 +48,20 @@ The configuration file (config/geant_fullsim.py) contains:
 To run fast simulation:
 
     ./run gaudirun.py config/geant_fastsim.py
-    
+   
 The differences between configuration file of the fast simulation (config/geant_fastsim.py) and the full simulation:
 
-    * simulation in Geant with different properties
+  * simulation in Geant with different properties
 
             geant4simulation = Geant4Simulation("Geant4Simulation", simtype="fast",
                                                 smearingtoolname = "SimpleSmear")
 
-    * additional tool for smearing
+  * additional tool for smearing
     
             from Configurables import SimpleSmear
             smear = SimpleSmear("SimpleSmear", sigma = 0.015)
             geant4simulation.addTool(smear)
-            
+
 3. Main algorithm: Geant4Simulation
 ----
 
@@ -73,7 +72,7 @@ Main algorithm for simulation with Geant4 Geant4Simulation derives from G4RunMan
 
 ### 3.1. Properties
 
-Gean4Simulation has 2 properties:
+Gean4Simulation has two properties:
 
     simtype
     smearingtoolname
@@ -85,7 +84,7 @@ Propery smearingtoolname is valid only for fast simulation. It is a name of a cl
 
 Geometry is provided by DD4hep via GAUDI's service GeoSvc.
 
-    * additionaly for fast simulation user wants a specific behaviour in certain geometry volumes. That specific behaviour is described in classes derived from G4VFastSimulationModel. Geant will not perform normal transportation inside volumes with fast simulation models attached, providing that particle triggers that model. 
+  * additionaly for fast simulation user wants a specific behaviour in certain geometry volumes. That specific behaviour is described in classes derived from G4VFastSimulationModel. Geant will not perform normal transportation inside volumes with fast simulation models attached, providing that particle triggers that model. 
     The fast simulation model needs to be attached to a G4Region object. That G4Region can contain one or many logical volumes (parts of the detector).
     Currently a fast simulation model FastSimModelTracker will be created and attached automatically for every G4LogicalVolume that contains 'tracker' in its name in DD4hep geometry constructor (with the intermidiate step of creating the G4Region). Work in progress to change that to be more customizable (set from xml file).
     
@@ -93,12 +92,12 @@ Geometry is provided by DD4hep via GAUDI's service GeoSvc.
 
 Geant simulation requires the particles and processes definitions - the so-called physics list. The currently used physics list is FTFP_BERT, which is recommended by Geant4 for HEP.
 
-    * additionaly for fast simulation:
-        - "Coupled Transportation" is used which allows to invoke G4PathFinder which propagates the particle in the magnetic field.
-        It is used within fast simulation model for tracker to compute the exit position of a particle from the volume (taking the momentum from the entrance to the tracker volume).
-        - FastSimPhysics is registered as an additional process (GeantSim/GeantFast/GeantFast/FastSimPhysics.h). It attaches the fast simulation manager process to ALL the particles. That means that along with the standard processes such as transportation, multiple scattering etc. the particle can encounter 'fast simulation' process. That happens if a particle enters a volume with fast simulation model attached and if that particle fullfils trigger conditions (is charged in case of FastSimModelTracker).
-        Details may be found at
-                    http://geant4.web.cern.ch/geant4/UserDocumentation/UsersGuides/ForApplicationDeveloper/html/ch05s02.html#sect.PhysProc.Param
+  * additionaly for fast simulation:
+     - "Coupled Transportation" is used which allows to invoke G4PathFinder which propagates the particle in the magnetic field.
+     It is used within fast simulation model for tracker to compute the exit position of a particle from the volume (taking the momentum from the entrance to the tracker volume).
+     - FastSimPhysics is registered as an additional process (GeantSim/GeantFast/GeantFast/FastSimPhysics.h). It attaches the fast simulation manager process to ALL the particles. That means that along with the standard processes such as transportation, multiple scattering etc. the particle can encounter 'fast simulation' process. That happens if a particle enters a volume with fast simulation model attached and if that particle fullfils trigger conditions (is charged in case of FastSimModelTracker).
+     Details may be found at
+                http://geant4.web.cern.ch/geant4/UserDocumentation/UsersGuides/ForApplicationDeveloper/html/ch05s02.html#sect.PhysProc.Param
 
 
 ### 3.4. User Actions
