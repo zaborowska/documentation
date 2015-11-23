@@ -84,10 +84,12 @@ Propery smearingtoolname is valid only for fast simulation. It is a name of a cl
 
 Geometry is provided by DD4hep via GAUDI's service GeoSvc.
 
-  * additionaly for fast simulation user wants a specific behaviour in certain geometry volumes. That specific behaviour is described in classes derived from G4VFastSimulationModel. Geant will not perform normal transportation inside volumes with fast simulation models attached, providing that particle triggers that model. 
-    The fast simulation model needs to be attached to a G4Region object. That G4Region can contain one or many logical volumes (parts of the detector).
-    Currently a fast simulation model FastSimModelTracker will be created and attached automatically for every G4LogicalVolume that contains 'tracker' in its name in DD4hep geometry constructor (with the intermidiate step of creating the G4Region). Work in progress to change that to be more customizable (set from xml file).
-    
+  * In fast simulation user wants a specific behaviour in certain geometry volumes. That specific behaviour is described in classes derived from G4VFastSimulationModel. Geant will not perform normal transportation inside volumes with fast simulation models attached (providing that particle triggers that model).
+
+  The fast simulation model needs to be attached to a G4Region object. That G4Region can contain one or many logical volumes (parts of the detector).
+
+  Currently a fast simulation model FastSimModelTracker (GeantSim/GeantFast/GeantFast/FastSimModelTracker.h) will be created and attached automatically for every G4LogicalVolume that contains 'tracker' in its name in DD4hep geometry constructor (with the intermidiate step of creating the G4Region). Work in progress to change that to be more customizable (in particular set from xml file).
+
 ### 3.3. Physics List
 
 Geant simulation requires the particles and processes definitions - the so-called physics list. The currently used physics list is FTFP_BERT, which is recommended by Geant4 for HEP.
@@ -96,6 +98,7 @@ Geant simulation requires the particles and processes definitions - the so-calle
      - "Coupled Transportation" is used which allows to invoke G4PathFinder which propagates the particle in the magnetic field.
      It is used within fast simulation model for tracker to compute the exit position of a particle from the volume (taking the momentum from the entrance to the tracker volume).
      - FastSimPhysics is registered as an additional process (GeantSim/GeantFast/GeantFast/FastSimPhysics.h). It attaches the fast simulation manager process to ALL the particles. That means that along with the standard processes such as transportation, multiple scattering etc. the particle can encounter 'fast simulation' process. That happens if a particle enters a volume with fast simulation model attached and if that particle fullfils trigger conditions (is charged in case of FastSimModelTracker).
+
      Details may be found at
                 http://geant4.web.cern.ch/geant4/UserDocumentation/UsersGuides/ForApplicationDeveloper/html/ch05s02.html#sect.PhysProc.Param
 
@@ -104,9 +107,9 @@ Geant simulation requires the particles and processes definitions - the so-calle
 
 Geant allows to specify actions that will be invoked at different stages of event processing.
 
-TrackingAction (GeantSim/GeantGeneral/GeantGeneral/TrackingAction.h) saves to the EDM the information on simulated particle properties (at the end of processing particle with Geant).
+TrackingAction (GeantSim/GeantGeneral/GeantGeneral/TrackingAction.h) saves to the EDM the information on simulated particle (at the end of processing the particle with Geant).
 
-In order to be able to preserve the association between the MCParticle and Particle in EDM, the association is created while the event is translated from EDM to G4Event. A handle to MCParticle and associated Particle (at that time empty) is stored in ParticleInformation (GeantSim/GeantGeneral/GeantGeneral/ParticleInformation.h). It is an object that Geant allows to be created for each g4particle object. At the end of tracking, the informaition about the simulated particle (momentum, vertex position) is saved in the (EDM) Particle using the handle from ParticleInformation.
+In order to be able to preserve the association between the MCParticle and Particle in EDM, the association is created while the event is translated from EDM to G4Event. A handle to MCParticle and associated Particle (at that time empty) is stored in ParticleInformation (GeantSim/GeantGeneral/GeantGeneral/ParticleInformation.h). It is an object that Geant allows to be created for each g4particle object. At the end of tracking, the information about the simulated particle (momentum, vertex position) is saved in the (EDM) Particle using the handle from ParticleInformation.
 
 The user actions are the last (and optional) element of G4RunManager initialization.
 
@@ -114,5 +117,6 @@ The user actions are the last (and optional) element of G4RunManager initializat
 ### 3.5. Event Processing
 
 For each execution of the algorithm an EDM MCParticleCollection is translated into G4Event using the method G4Simulation::EDM2G4().
-At the same time the ParticleCollection is created so that the association between MCParticle and Particle in EDM can be preserved. ParticleCollection will be the collection of the so-called 'reconstructed' particles. 'Reconstructed' in this case means the particles have undergone simulation process and the resulting changes to the momentum are taken into account. It does not involve any reconstruction process at all.
+
+At the same time the ParticleCollection is created so that the association between MCParticle and Particle in EDM can be preserved. ParticleCollection will be the collection of the so-called 'reconstructed' particles. 'Reconstructed' in this case means the particles have undergone simulation process and the resulting changes to the momentum are taken into account. It does not involve any reconstruction process.
 
