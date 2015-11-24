@@ -165,3 +165,13 @@ At the same time the ParticleCollection is created so that the association betwe
 In case of running the simulation with simtype=='fast', user can define a smearing tool that should be used.
 
 Smearing is performed using the GAUDI tool derived from ISmearingTool. User may specify how to smear a vector (CLHEP::ThreeVector) or a scalar (double). Currently there is only one implementation of a smearing tool called SimpleSmear (GeantSim/GeantComponents/src/SimpleSmear.h). The momentum/energy are smeared by multiplying Gaussian distribution with the mean $\mu=1$ and the standard deviation $\sigma$ as specified in the tool properties (default: 0.01).
+
+
+5. Units
+-----
+
+Important aspect of the translations between HepMC, EDM and Geant4 are the units. Since each framework uses by default different units, every translation should take that into account.
+
+Conversions between EDM and Geant4 are specified in FCCSW/GeantSim/GeantGeneral/GeantGeneral/Units.h.
+
+Conversions between EDM and HepMC depend on the units used by HepMC input file (changes from file to file) and is therefore handled separately in HepMCConverter class.
