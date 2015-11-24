@@ -1,5 +1,19 @@
 Simulation with Geant4 in FCCSW
 ====
+
+Full simulation uses the detailed detector description and simulates the particles passage through it taking into account all the physics processes they may encounter. It is very time and CPU consuming.
+
+Therefore for many tasks, especially in the early stage of detector design, the fast simulation is used. It takes a less detailed description of the detector and does not simulate every particle step-by-step. Instead, it simulates the overall response of the (particular) detector in a parametric way.
+
+Generated particles are transported inside the detector and they are smeared taking into account the resolutions and efficiency (their 4-momentum and/or position). Those smeared particles may be analysed and treated as reconstructed particles, even though no hits were produced and no reconstruction was performed. All the detector effects (both physics processes that may encounter and detector resolutions) come from the smearing process.
+
+The resolutions used in the smearing may come arbitrary from our knowledge of the detectors. In that case one applies a Gaussian smearing with a given standard deviation. That approach may be also used by the physicists to test how the detector resolution affect the results. That smearing is currently implemented in FCCSW.
+
+More complex approach involves construction of the tables with detector resolutions (pseudorapidity/momentum/particle dependent). They are calculated from a small (relatively) sample of full simulations of single-particle events. Single-particle events simplify the reconstruction process (they don't involve the pattern recognition etc.). Such resolutions are valid for tested detectors hence they may be used for smearing the particles with a better accuracy. Implementation of this approach is still in progress.
+
+Both full and fast simulation can be performed in FCCSW using Geant4. Since the same tools are used for both of them, each simulation may be an interplay of both with full simulation performed in some volumes and fast simulation in others.
+
+
 1. Full simulation
 ----
 
