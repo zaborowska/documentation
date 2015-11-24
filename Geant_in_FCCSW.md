@@ -22,17 +22,21 @@ The configuration file (config/geant_fullsim.py) contains:
             hepmc_converter.Outputs.genvertices.Path="all_genvertices"
 
   * construction of geometry using DD4hep
+    - path to the XML file with geometry is specified as a property "detector"
 
-            from Configurables import GeoSvc
-            geoservice = GeoSvc("GeoSvc", OutputLevel = VERBOSE)
+                  from Configurables import GeoSvc
+                  geoservice = GeoSvc("GeoSvc",
+                                       detector='file:DetectorDescription/Detectors/compact/ParametricSimTracker.xml',
+                                       OutputLevel = VERBOSE)
 
   * simulation with Geant
+    - simulation type is specified in a property "simtype"
 
-            from Configurables import Geant4Simulation
-            geant4simulation = Geant4Simulation("Geant4Simulation", simtype="full")
-            geant4simulation.Inputs.genparticles.Path="all_genparticles"
-            geant4simulation.Outputs.particles.Path = "recparticles"
-            geant4simulation.Outputs.particleassociation.Path = "particleMCparticle"
+                 from Configurables import Geant4Simulation
+                 geant4simulation = Geant4Simulation("Geant4Simulation", simtype="full")
+                 geant4simulation.Inputs.genparticles.Path="all_genparticles"
+                 geant4simulation.Outputs.particles.Path = "recparticles"
+                 geant4simulation.Outputs.particleassociation.Path = "particleMCparticle"
 
   * saving the output
 
@@ -63,6 +67,8 @@ To run fast simulation:
 The differences between configuration file of the fast simulation (config/geant_fastsim.py) and the full simulation:
 
   * simulation in Geant with different properties
+    - simulation type is specified in a property "simtype"
+    - name of the tool used for smearing is specified in a property "smearingtoolname"
 
             geant4simulation = Geant4Simulation("Geant4Simulation", simtype="fast",
                                                 smearingtoolname = "SimpleSmear")
@@ -95,12 +101,12 @@ Property smearingtoolname is valid only for fast simulation. It is a name of a c
 
 Geometry is provided by DD4hep via GAUDI's service GeoSvc.
 
-Currently the xml file is hard-coded into the GeoSvc constructor (DetectorDescription/DetDesServices/src/GeoSvc.cxx). There is ongoing work to move it to the configuratio file for easier changes.
-
-DD4hep translates the geometry into Geant4 geometry. That translation is done based on xml file as well as on the coresponding constructors:
+DD4hep translates the geometry into Geant4 geometry. That translation is done based on xml file as well as on the corresponding constructors:
 
        DetectorDescription/Detectors/compact/ParametricSimTracker.xml
        DetectorDescription/Detectors/src/ParametricSimTracker_geo.cxx
+
+Path to the XML file with detector description is a property of service GeoSvc.
 
   * In fast simulation user wants a specific behaviour in certain geometry volumes. That specific behaviour is described in classes derived from G4VFastSimulationModel. Geant will not perform normal transportation inside volumes with fast simulation models attached (providing that particle triggers that model).
 
@@ -137,7 +143,6 @@ The user actions are the last (and optional) element of G4RunManager initialisat
 For each execution of the algorithm an EDM MCParticleCollection is translated into G4Event using the method G4Simulation::EDM2G4().
 
 At the same time the ParticleCollection is created so that the association between MCParticle and Particle in EDM can be preserved. ParticleCollection will be the collection of the so-called 'reconstructed' particles. 'Reconstructed' in this case means the particles have undergone simulation process and the resulting (final) changes to the momentum are taken into account. At this stage it does not involve any reconstruction process.
-
 
 
 4. Smearing
