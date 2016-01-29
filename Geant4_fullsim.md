@@ -1,269 +1,399 @@
-Simulation with Geant4 in FCCSW (after restructure)
+Full Simulation with Geant4 in FCCSW (after restructure)
 ====
 
-Full simulation uses the detailed detector description and simulates the particles passage through it, taking into account all the physics processes they may encounter. It is very time and CPU consuming.
+Instruction on how to use Geant4 within FCCSW (GAUDI framework).
 
-Therefore for many tasks, especially in the early stage of detector design, the fast simulation is used. It takes a less detailed description of the detector and does not simulate every particle step-by-step. Instead, it simulates the overall response of the (particular) detector in a parametric way.
+For additional information on fast simulation [see](Geant4_fastsim.md).
 
-Generated particles are transported inside the detector and they (their 4-momentum and/or position) are smeared taking into account the resolutions and efficiency. Those smeared particles may be analysed and treated as reconstructed particles, even though no hits were produced and no reconstruction was performed. All the detector effects (both physics processes that may encounter and detector resolutions) come from the smearing process (or rather the resolutions that were used for smearing).
+All relative paths refer to the main FCCSW directory.
 
-The resolutions used in the smearing may come arbitrary from our knowledge of the detectors. In that case one applies a Gaussian smearing with a given standard deviation. That approach may be also used by the physicists to test how the detector resolution affect the results. That smearing is currently implemented in FCCSW.
+## Contents
+1. [Ovierview](#1-overview)
+   * [GAUDI](#1-1-gaudi)
+   * [Geant](#1-2-geant-components)
+   * [Sim in FCCSW](#1-3-simulation-package-in-fccsw)
+2. [Example of full sim configuration](#2-example)
+3. [Geant configuration via GAUDI service `G4SimSvc`](#3-geant-configuration-via-gaudi-service-g4simsvc)
+  * [Geometry construction](#3-1-geometry-construction)
+  * [Physics list](#3-2-physics-list)
+  * [User actions](#3-3-user-actions)
+4. [Simulation in GAUDI algorithm `G4SimAlg`](#4-simulation-in-gaudi-algorithm-g4simalg)
+  * [Events](#4-1-event-processing)
+  * [Output](#4-2-output)
+5. [Units](#5-units)
 
-More complex approach involves construction of the tables with the detector resolutions (pseudorapidity/momentum/particle dependent). They are calculated from a small (relatively) sample of full simulations of single-particle events. Single-particle events simplify the reconstruction process (they don't involve the pattern recognition etc.). Such resolutions are valid for tested detectors hence they may be used for smearing the particles with a better accuracy. Implementation of this approach is still in progress.
 
-TODO: gflash
+## How to
+* [change the geometry](#how-to-use-different-geometry)
+* [use sensitive detectors](#sensitive-detectors)
+* [change the physics list](#how-to-use-different-physics-list)
+* [add user action](#how-to-add-user-action)
+* [use particle gun (single particle events)](#how-to-use-particle-gun)
 
-Both full and fast simulation can be performed in FCCSW using Geant4. Since the same tools are used for both of them, each simulation may be an interplay of both with full simulation performed in some volumes and fast simulation in others.
+[DD4hep]: http://aidasoft.web.cern.ch/DD4hep "DD4hep user manuals"
+[DD4hep manual]: http://www.cern.ch/frankm/DD4hep/DD4hepManual.pdf "DD4hep manual"
 
+## 1. Overview
 
-1. Full simulation
-----
+### 1.1. GAUDI
 
-To run a full simulation:
+GAUDI application framework provides 'blocks' of software that can interact with each other. Those 'blocks' (GAUDI components) are: tools, algortihms and serivices. Each of them has its own interface that defines the basic functionality.
+User may specify which 'blocks' (and how) should be created in a job configuration file (written in python).
+Basic usage of GAUDI application can be limited to only editing that job configuration file.
 
-    ./run gaudirun.py options/geant_fullsim.py
+#### Properties
+
+All components may contain data members which can be initialised from the job configuration file. Those variables are called *properties* and need to be declared in the constructor. For instance that may be `int`, `double`, `std::string`, but also a `ToolHandle` or `std::vector<std::string>`.
+A property may be set in a python configuration either when a component is created
+
+~~~{.py}
+# algorithm HepMCReader with a property "Filename"
+# in HepMCReader class declaration:
+#                  std::string m_filename;
+# in HepMCReader constructor:
+#                  declareProperty("Filename", m_filename="");
+# in python configuration file:
+reader = HepMCReader("Reader", Filename="example_MyPythia.dat")
+~~~
+
+or afterwards (except for ToolHandle - TODO CHECK)
+
+~~~{.py}
+# algorithm PodioOutput with a property "outputCommands"
+# in PodioOutput class declaration:
+#                  std::vector<std::string> m_outputCommands;
+# in PodioOutput constructor:
+#                  declareProperty("outputCommands", m_outputCommands=defaultCommands);
+# in python configuration file:
+out.outputCommands = ["keep *"]
+~~~
+
+#### Data inputs and outputs
+
+In particular, both tools and algorithms may have specified data input and output (`DataHandle<T>`). They are declared in the construcotr as well.
+
+~~~{.py}
+# algorithm HepMCReader with output "hepmc"
+# in HepMCReader class declaration:
+#                  DataHandle<HepMC::GenEvent> m_hepmchandle;
+# in HepMCReader constructor:
+#                  declareOutput("hepmc", m_hepmchandle);
+reader.DataOutputs.hepmc.Path = "hepmcevent"
+~~~
+
+Path "hepmc" is further an input to the next algorithm, which is an algorithm `HepMCConverter`
+(Note that common name `hepmc` in those algorithms is just a coincidence. What matters is the path specified in python file).
+
+~~~{.py}
+# algorithm HepMCReader with a property "outputCommands"
+# in HepMCConverter class declaration:
+#                  DataHandle<HepMC::GenEvent> m_hepmchandle;
+# in HepMCConverter constructor:
+#                  declareInput("hepmc", m_hepmchandle);
+hepmc_converter.DataInputs.hepmc.Path="hepmcevent"
+~~~
+
+### 1.2. Geant components
+
+Geant main manager class is `G4RunManager`. It has own implementation in FCCSW `sim::RunManager` as the event flow is governed by GAUDI and not by Geant.
+
+#### Main service `G4SimSvc` ([see more](#3-geant-configuration-via-gaudi-service-g4simsvc))
+
+The main simulation service `G4SimSvc` owns `sim::RunManager` and controls the communication between GAUDI and Geant (`sim::RunManager`).
+
+Necessary information about the simulation that needs to be given:
+* detector geometry
+* physics list describing all the particles that can be created in the simulation and all the processes they may encounter
+* additional requirements (so-called user actions)
+
+All those may be set by Gaudi Tools in a job configuration file. Tools need to derive from interfaces (respectively): `IG4DetectorConstruction`, `IG4PhysicsList` ans `IG4ActionTool`.
+
+This service is also passing events (`G4Event`) to and from Geant.
+
+#### Main algorithm `G4SimAlg` ([see more](#4-simulation-in-gaudi-algorithm-g4simalg))
+
+The main simulation algorithm communicates with `G4SimSvc` in each event loop execution.
+It is responsible for the translation of the EDM event (`MCParticleCollection`) to `G4Event`, passing it to be simulated and retrieving it afterwards.
+Retrieved `G4Event` contains the very same primary particles and vertices, though it also contains hits collections and various information. In particular, user may implement `G4VUserEventInformation`, `G4VUserTrackInformation` etc.
+To enable a flexible setting of what should be saved from an event, it may be specified in a tool derived from `IG4SaveOutputTool`. Currently there are `G4SaveTrackerHits` and `G4SaveCalHits` tools.
+A property `outputs` of `G4SimAlg` takes a list of stings with the tool names.
+Those tools should declare the output that is supposed to be further stored by the algorithm `PodioOutput`.
+
+### 1.3. Simulation package in FCCSW
+
+TODO short intro what is where
+
+## 2. Example
+
+~~~{.sh}
+./run gaudirun.py options/geant_fullsim.py
+~~~
 
 The configuration file (options/geant_fullsim.py) contains:
-  * reading an event saved in a HepMC file
+  * reading an event from a HepMC file
 
-            from Configurables import HepMCReader
-            reader = HepMCReader("Reader", Filename="example_MyPythia.dat")
-            reader.Outputs.hepmc.Path = "hepmc"
+    ~~~{.py}
+    from Configurables import HepMCReader
+    reader = HepMCReader("Reader", Filename="example_MyPythia.dat")
+    reader.DataOutputs.hepmc.Path = "hepmc"
+    ~~~
 
   * translating a HepMC event to the EDM
 
-            from Configurables import HepMCConverter
-            hepmc_converter = HepMCConverter("Converter")
-            hepmc_converter.Inputs.hepmc.Path="hepmc"
-            hepmc_converter.Outputs.genparticles.Path="all_genparticles"
-            hepmc_converter.Outputs.genvertices.Path="all_genvertices"
+    ~~~{.py}
+    from Configurables import HepMCConverter
+    hepmc_converter = HepMCConverter("Converter")
+    hepmc_converter.DataInputs.hepmc.Path="hepmc"
+    hepmc_converter.DataOutputs.genparticles.Path="all_genparticles"
+    hepmc_converter.DataOutputs.genvertices.Path="all_genvertices"
+    ~~~
 
-  * construction of geometry using DD4hep
-    - path to the XML file with geometry is specified as a property "detector"
+  * construction of the geometry using DD4hep
+    - `detector` - path to the XML file with geometry
 
-                  from Configurables import GeoSvc
-                  geoservice = GeoSvc("GeoSvc",
-                                       detector='file:DetectorDescription/Detectors/compact/TestTracker.xml',
-                                       OutputLevel = VERBOSE)
+    ~~~{.py}
+    from Configurables import GeoSvc
+    geoservice = GeoSvc("GeoSvc",
+                         detector='file:DetectorDescription/Detectors/compact/TestTracker.xml',
+                         OutputLevel = VERBOSE)
+    ~~~
 
-  * Geant configuration
-    - specification of tools that will construct the detector, physics list and user actions
+  * Geant configuration ([see more](#3-geant-configuration-via-gaudi-service-g4simsvc))
+    - `detector` - tool providing the [geometry](#3-1-geometry-construction), possible: G4DD4hepDetector and [G4GdmlDetector](#gdml-example)
+    - `physicslist` - tool providing the [physics list](#3-2-physics-list), possible: [G4FtfpBert](#)
+    - `actions` - tool providing the [user actions initialization list](#3-3-user-actions), possible: G4FullSimActions
+    ~~~{.py}
+    from Configurables import G4SimSvc
+    geantservice = G4SimSvc("G4SimSvc",
+                             detector='G4DD4hepDetector',
+                             physicslist="G4FtfpBert",
+                             actions="G4FullSimActions" )
+    ~~~
 
-                 from Configurables import G4SimSvc
-                 geantservice = G4SimSvc("G4SimSvc",
-                                          detector='G4DD4hepDetector',
-                                          physicslist="G4FtfpBert",
-                                          actions="G4FullSimActions" )
 
+  * simulation ([see more](#4-simulation-in-gaudi-algorithm-g4simalg))
+    - `outputs` - names of the tools saving the [output](#4-2-output) from a simulated event,
+      possible: G4SaveTrackerHits, G4SaveCalHits
 
-  * simulation
-    - creation of the simulation algorithm G4SimAlg with EDM input particles "genParticles"
-    - specification of the tools that save the output from a simulated event (list of names "outputs")
-      eg. G4SaveTrackerHits
-
-                 from Configurables import G4SimAlg, G4SaveTrackerHits
-                 savetrackertool = G4SaveTrackerHits("G4SaveTrackerHits")
-                 savetrackertool.DataOutputs.trackClusters.Path = "clusters"
-                 savetrackertool.DataOutputs.trackHits.Path = "hits"
-                 savetrackertool.DataOutputs.trackHitsClusters.Path = "hitClusterAssociation"
-                 geantsim = G4SimAlg("G4SimAlg",
-                                      outputs= ["G4SaveTrackerHits/G4SaveTrackerHits"])
-                 geantsim.DataInputs.genParticles.Path="allGenParticles"
+    ~~~{.py}
+    from Configurables import G4SimAlg, G4SaveTrackerHits
+    savetrackertool = G4SaveTrackerHits("G4SaveTrackerHits")
+    savetrackertool.DataOutputs.trackClusters.Path = "clusters"
+    savetrackertool.DataOutputs.trackHits.Path = "hits"
+    savetrackertool.DataOutputs.trackHitsClusters.Path = "hitClusterAssociation"
+    geantsim = G4SimAlg("G4SimAlg",
+                         outputs= ["G4SaveTrackerHits/G4SaveTrackerHits"])
+    geantsim.DataInputs.genParticles.Path="allGenParticles"
+    ~~~
 
   * saving the output to ROOT file
 
-            from Configurables import PodioWrite, PodioOutput
-            out = PodioOutput("out",
-                               OutputLevel=DEBUG)
-            out.outputCommands = ["keep *"]
+    ~~~{.py}
+    from Configurables import PodioWrite, PodioOutput
+    out = PodioOutput("out",
+                       OutputLevel=DEBUG)
+    out.outputCommands = ["keep *"]
+    ~~~
 
   * GAUDI's main component
-      - stating which algorithms (TopAlg) should be initialised, executed and finalised in the event loop
-      - specifying how many events from the input file should be processed (EvtMax)
-      - stating which services (ExtSvc) should be created at initialisation
+      - stating which algorithms (`TopAlg`) should be initialised, executed and finalised in the event loop
+      - specifying how many events from the input file should be processed (`EvtMax`)
+      - stating which services (`ExtSvc`) should be created at initialisation
+      - output level (`OutputLevel`), possible: VERBOSE, DEBUG, INFO, WARNING, ERROR, FATAL, ALWAYS
 
-                from Configurables import ApplicationMgr
-                ApplicationMgr( TopAlg = [reader, hepmc_converter, geantsim, out],
-                                EvtSel = 'NONE',
-                                EvtMax   = 1,
-                                ExtSvc = [podioevent, geoservice, geantservice], # order! geo needed by geant
-                                OutputLevel=DEBUG
-                                )
+    ~~~{.py}
+    from Configurables import ApplicationMgr
+    ApplicationMgr( TopAlg = [reader, hepmc_converter, geantsim, out],
+    EvtSel = 'NONE',
+    EvtMax   = 1,
+    ExtSvc = [podioevent, geoservice, geantservice], # order! geo needed by geant
+    OutputLevel = DEBUG
+    )
+    ~~~
 
-
+#### HCal example
 As an alternative, user can eg. create a hadronic calorimeter using DD4hep and save the hits:
 
-    ./run gaudirun.py Sim/SimG4Components/tests/geant_fullsim_hcal.py
+~~~{.sh}
+./run gaudirun.py Sim/SimG4Components/tests/geant_fullsim_hcal.py
+~~~
 
-or create a detector using GDML. In this case, however, no sensitive detectors are predifined and user is responsible for the implementation of the sensitive detectors. Preferable hit format is the one used by DD4hep (eg. DD4hep::Simulation::Geant4CalorimeterHit), this way user may use the saving output utilities that are already provided.
+#### GDML example
+or create a detector using GDML. In this case, however, no sensitive detectors are predifined and user is responsible for their implementation. Preferable hit format is the one used by DD4hep (eg. DD4hep::Simulation::Geant4CalorimeterHit), this way user may use the saving output utilities that are already provided.
 
-    ./run gaudirun.py Sim/SimG4Components/tests/geant_fullsim_gdml.py
-
-
-2. Fast simulation
-----
-
-To run fast simulation:
-
-    ./run gaudirun.py config/geant_fastsim.py
-
-The differences between configuration file of the fast simulation (options/geant_fastsim.py) and the full simulation:
-
-  * Geant configuration
-    - physics list for the fast simulation is an overlay of the full sim physics list.
-      It registers the parametrisation process to "fullphysics" list.
-
-                 from Configurables import G4FastSimPhysicsList
-                 physicslisttool = G4FastSimPhysicsList("Physics", fullphysics="G4FtfpBert")
-
-    - action initialization contains the list of user actions to be set in Geant
-      (in particular InitializeModelsRunAction essential for the fast sim models registration to the geometry).
-      Also a simple smearing tool is created with a constant resolution.
-
-                 from Configurables import G4FastSimActions, G4ParticleSmearSimple
-                 smeartool = G4ParticleSmearSimple("Smear", sigma = 0.15)
-                 actionstool = G4FastSimActions("Actions", smearing=smeartool)
-
-    - specification of tools that will construct the detector, physics list and user actions
-
-                 from Configurables import G4SimSvc
-                 geantservice = G4SimSvc("G4SimSvc",
-                                          detector='G4DD4hepDetector',
-                                          physicslist=physicslisttool,
-                                          actions=actionstool)
-
-
-  * simulation
-    - as for full sim, but using different tools to store the output of the simulation
-
-                 from Configurables import G4SimAlg,G4SaveSmearedParticles
-                 saveparticlestool = G4SaveSmearedParticles("G4SaveSmearedParticles")
-                 saveparticlestool.DataOutputs.particles.Path = "smearedParticles"
-                 saveparticlestool.DataOutputs.particlesMCparticles.Path = "particleMCparticleAssociation"
-                 geantsim = G4SimAlg("G4SimAlg",
-                                      outputs = ["G4SaveSmearedParticles/G4SaveSmearedParticles"])
-                 geantsim.DataInputs.genParticles.Path="allGenParticles"
+~~~{.sh}
+./run gaudirun.py Sim/SimG4Components/tests/geant_fullsim_gdml.py
+~~~
 
 
 3. Geant configuration: via GAUDI service G4SimSvc
 ----
 
-(Sim/SimG4Components/src/G4SimSvc.h)
+Main service for simulation with Geant4 `G4SimSvc` owns `sim::RunManager` which derives from `G4RunManager`. Own implementation of G4RunManager was necessary in order to leave the event flow to GAUDI. All the details that does not concern the particle generator remain the same. Consult Geant4 [User's Guide](http://geant4.web.cern.ch/geant4/UserDocumentation/UsersGuides/ForToolkitDeveloper/html/index.html) or [Physics Manual](http://geant4.web.cern.ch/geant4/UserDocumentation/UsersGuides/PhysicsReferenceManual/fo/PhysicsReferenceManual.pdf) for more details.
 
-Main service for simulation with Geant4, G4SimSvc, contains the RunManager which derives from G4RunManager. Own implementation of G4RunManager was necessary in order to leave the event flow to GAUDI.
-Any communication to the Geant Run Manager is handled by tthe service:
-    - configuration:
-      - geometry construction
-      - physics list initialization
-      - user action initialization
-    - simulation:
-      - passing an event to G4EventManager
-      - retrieving a simulated event (with hits collections and other information)
+In particular, there are two basic ingredients of the simulation: geometry that describes what is the material in which particle is propagated, and a so-called physics list that contains all the particles that may be created in the simulation together with an associated list of physics processes they may encounter.
+
+The general concept of the simulation in Geant is to divide each simulation 'stage' into smaller pieces until the smallest (and simpliest) is reached. The most overall is **run** which is a set of **events**. Each event consists of primary particles that are represented by **tracks**. Each track in a simulation is a **step**-by-step analysis of a particle passage through matter. Geant toolkit leaves a user the possibility to monitor the simulation at any of those stages. Hence, the so-called user actions may be created that undertake user-specified action before/at/after certain stage.
+
+Any communication with the Geant Run Manager is handled by this service:
+- configuration:
+  - [geometry construction](#3-1-geometry-construction)
+  - [physics list initialization](#3-2-physics-list)
+  - [user actions initialization](#3-3-user-actions)
+- simulation:
+  - [passing an event to `G4EventManager`](#4-1-event-processing)
+  - [retrieving a simulated event (with hits collections and other information)](#4-2-output)
 
 
 ### 3.1. Geometry construction
 
-Geometry tool needs to be set as 'detector' property of G4SimSvc. There are two tools to create the geometry: G4DD4hepDetector and G4GdmlDetector. The latter constructs the detector using the GDML file, though it is only for test purposes and it is not meant to be used in FCC simulation. G4DD4hepDetector tool retrieves the geometry from the DD4hep service GeoSvc.
+FCCSW is using Detector Description for HEP (DD4hep) toolkit. Consult [user guides][DD4hep] for more details.
 
-DD4hep translates the geometry into Geant4 geometry. That translation is done based on xml file as well as on the corresponding constructors, eg.
+Geometry description requires the C++ factory methods of sub-detectors, see:
+~~~(.sh)
+DetectorDescription/Detectors/src/
+~~~
+as well as the XML configuration of the detector setup, including the dimensions, names, materials etc., see:
+~~~(.sh)
+DetectorDescription/Detectors/compact
+~~~
 
-       DetectorDescription/Detectors/compact/ParametricSimEnvelopes.xml
-       DetectorDescription/Detectors/src/SimpleTube_geo.cxx
+Main service responsible for handling the DD4hep setup is `GeoSvc`. It has a property **detector** that takes a string with a path to the detector description XML file.
 
-Path to the XML file with detector description is a property of the service GeoSvc.
+DD4hep is able to parse automatically the geometry to Geant4 format. It can be retrieved and passed to the Geant configuration service via tool `G4DD4hepDetector`. User needs to set the geometry tool in `G4SimSvc` (property **detector**) to `G4DD4hepDetector` (TODO: set it as a default case).
 
-TODO: What if I want another geometry
+In FCCSW there is an alternative way to create the geometry, via GDML description (and tool `G4GdmlDetector` with property **gdml** taking a path to the GDML file). It is meant only for the test purposes as it does not support sensitive detectors. User would need to create them on his own.
 
-  * In fast simulation user wants a specific behaviour in certain geometry volumes. That specific behaviour is described in classes derived from G4VFastSimulationModel. Geant will not perform normal transportation inside volumes with fast simulation models attached (providing that particle triggers that model).
+### Sensitive detectors
 
-  The fast simulation model needs to be attached to a G4Region object. That G4Region can contain one or many logical volumes (parts of the detector). Logical volumes are created by DD4hep translation. G4Region object is created automatically in InitializeModelsRunAction for any detector that has in its name 'Tracker', 'ECal', 'EMCal' or 'HCal'. Name of the detector is specified in DD4hep xml file under the tag:
+Sensitive detectors are responsible for creating the hits whenever a particle traverses through the active material. The segmentation of each detector can be described in DD4hep. If a user builds a detector containing only tracker(s) or calorimeter(s), a proper description of the detector in DD4hep is sufficient and there is no need to specify any sensitive detector in Geant4.
 
-        <detector name ="CentralTracker">
+##### DD4hep (see more in sec. 2.11 and 2.12 of [DD4hep manual])
+* XML file should contain:
+  * readout structure, a structure of a sensitive volume `<readout>`
+  * information on how each sensitive element is segmented `<segmentation>`
+  * unique identification of the location of each response `<id>`
 
-  Currently a fast simulation model FastSimModelTracker will be created and attached automatically for every G4LogicalVolume that contains 'tracker'.
-  There is also an ongoing work on implementation of the GFlash parametrisation that could be attached to the calorimeters.
-  Attaching the models is done in InitializeModelsRunAction and can be controlled (switched on/off for tracker/ECal/HCal detectors) via flags set in a constructor (set to true by default).
+  ~~~{.xml}
+  <readouts>
+    <readout name="BarHCal_Readout">
+      <segmentation type="CartesianGridXY" grid_size_x="0.05*mm" grid_size_y="0.05*mm"/>
+      <id>system:3,layer:10,wedge:7,sub_module:2,row:9,x:32:-16,y:-16</id>
+    </readout>
+  </readouts>
+  ~~~
+  > #### Note:
+  > Names of the readouts structures are used further in the implementations if IG4SaveOutputTool, hence they should contain the name of the detector type they represent: "Tracker", "ECal" (or "EMCal"), "HCal".
 
-TODO: What if I want another smearing
+* C++ factory method should:
+  * actually construct all the modules of the detector (extracting detail information eg. on number of modules in z direction or in phi, their material, etc. from the XML file)
+  * set the sensitive detector type to either **Geant4Tracker** or **Geant4Calorimeter**.
+    This way hits can be sotred in either `DD4hep::Simulation::Geant4TrackerHit` or `DD4hep::Simulation::Geant4CalorimeterHit`
+
+    ~~~{.cpp}
+    DD4hep::Geometry::SensitiveDetector::setType("Geant4Calorimeter");
+    ~~~
+
+    Furthermore, that will automatically create the hits collections that are stored in `G4HCofThisEvent` and can be accessed from `G4Event` after the simulation is done (how to access the event is described [further](#4-2-output)). Names of the collections are determined by the name of readout, set in XML file.
+
+
+### How to use different geometry
+
+In order to describe a detector, one needs an XML file and relevant C++ factory methods.
+To describe a sensitive detector consult the [short description](#sensitive-detectors) and sections 2.11 and 2.11 in [DD4hep manual].
+Further information may be also found on [DD4hep documentation webpage][DD4hep] and in DetectorDescription/doc/ (TODO add link).
+
+Once XML file is done, it can be passed as a property **detector** to `GeoSvc` which will parse it and translate the geometry to Geant format.
+___
+
 
 ### 3.2. Physics List
 
-Physics list tool needs to be set as 'physicslist' property of G4SimSvc.
+Physics list describes all the particles and physics processes used in the simulation.
 
-Geant simulation requires the particles and processes definitions - the so-called physics list. The currently used physics list is FTFP_BERT, which is recommended by Geant4 for HEP. The tool creating this list is called G4FtfpBert.
+Physics list tool needs to be set as **physicslist** property of `G4SimSvc`.
 
-TODO: What if I want another physics list
+The currently used physics list is FTFP_BERT, which is recommended by Geant4 for HEP. The tool creating this list is called `G4FtfpBert`. It simply creates `G4VModularPhysicsList`.
 
-  * additionally for fast simulation:
-    Fast simulation requires registration of another process, called in Geant FastSimManagerProcess. It can be attached to any existing physics list (like FTFP_BERT). The tool for the fast sim is called G4FastSimPhysicsList. It has a property 'fullphysics' that accepts a name of a tool with full sim physics definition.
-Fast simulation manager process is attached to ALL the particles defined by the full sim physics list. That means that along with the standard processes such as transportation, multiple scattering etc. the particle can encounter 'fast simulation' process. That happens if a particle enters a volume with fast simulation model attached (which happens in InitializeModelsRunAction) and if that particle fulfils trigger conditions (is charged in case of FastSimModelTracker).
+List of other reference physics list may be found [here](http://geant4.cern.ch/geant4/support/proc_mod_catalog/physics_lists/referencePL.shtml)
 
-Furthermore, the fast simulation tool uses "Coupled Transportation"  which allows to invoke G4PathFinder which propagates the particle in the magnetic field. It is used within fast simulation model for tracker to compute the exit position of a particle from the volume (taking the momentum from the entrance to the tracker volume).
+### How to use different physics list
+In order to use a different physics list, one need to construct a physics list tool basing on `G4FtfpBert` tool.
 
-     Details may be found at
-                http://geant4.web.cern.ch/geant4/UserDocumentation/UsersGuides/ForApplicationDeveloper/html/ch05s02.html#sect.PhysProc.Param
+Any new implementation of a physics list (or any other component) should be presented in a pull request to HEP-FCC/FCCSW for any other person to use it.
+___
 
 
 ### 3.3. User Actions
 
-User actions tool needs to be added as a property "actions" to G4SimSvc.
+User actions tool needs to be added as a property **actions** to `G4SimSvc`.
 
-Geant allows to specify actions that will be invoked at different stages of event processing.
-User actions are created in the implementation of GVUserActionInitialization class, eg. FullSimActions::Build().
-GAUDI component (tool) that creates FullSimActions is called G4FullSimActions.
+Geant allows users to specify what should be performed at any stage of simulation.
+User actions are created in the implementation of `GVUserActionInitialization` class, eg. `FullSimActions::Build()`.
+Any implementation of action initialization list should have a relevant GAUDI component (tool) that creates it. Tool creating `FullSimActions` is called `G4FullSimActions`.
 
-Currently FullSimActions is empty and no user actions are created.
+Currently `FullSimActions` is empty and no user actions are created.
 
-TODO: What if user wants to create ans interchange few initializations.
+User actions may derive from the following G4 intefaces:
+* G4UserRunAction.hh
+* G4UserEventAction.hh
+* G4UserStackingAction.hh
+* G4UserTrackingAction.hh
+* G4UserSteppingAction.hh
+* G4UserTimeStepAction.hh
 
-For the fast simulation purposes, a InitializeModelsRunAction is created. It loops over all logical volumes in the world volume and creates G4Region for any volume with 'Tracker' in the detector name. All those regions become envelopes of the FastSimModelTracker.
-Each model will use smearing tool for the momentum/energy smearing, so the name of the smearing tool needs to be passed to the InitializeModelsRunAction through the property of G4FastSimActions.
 
-Smearing is performed using the GAUDI tool derived from ISmearingTool. User may specify how to smear a vector (CLHEP::ThreeVector) or a scalar (double). Currently there is only one implementation of a smearing tool called SimpleSmear (GeantSim/GeantComponents/src/SimpleSmear.h). The momentum/energy are smeared by multiplying Gaussian distribution with the mean $\mu=1$ and the standard deviation $\sigma$ as specified in the tool properties (default: 0.01).
+### How to add user action
 
-Also, there is a tracking user action SaveParticlesUserAction that sets the information about the momentum, position and status of each particle at the end of tracking. The information ParticleInformation is associated with any G4PrimaryPaarticle and can be retrieved after the simulation from an event (see ... TODO).
+Any user action that derives from Geant4 interface can be implemented in Sim/SimG4Full.
 
-4. Simulation algorithm G4SimAlg
+In order to invoke this action in the simulation, it should be created in the `FullSimActions::Build()` method.
+
+If one wants to use different sets of user actions without a need to recompile FCCSW, one may implement his own implementation of `GVUserActionInitialization`. In that case, a relevant GAUDI tool should be created, basing on `G4FullSimActions`. Its name should follow the convention of adding a prefix "G4" to the name of the class that it creates.
+___
+
+## 4. Simulation in GAUDI algorithm G4SimAlg
 
 Simulation algorithm handles all the communication between other algorithms and G4SimSvc.
-It takes as input the EDM MCParticleCollection.
-Also, a list of names to the output-saving tools can be specified as "outputs".
+
+It takes as input **genParticles** the EDM MCParticleCollection.
+
+Also, a list of names to the output-saving tools can be specified in **outputs**.
+
 
 ### 4.1. Event Processing
 
-For each execution of the algorithm an EDM MCParticleCollection is translated into G4Event using the method G4SimAlg::EDM2G4(). At the translation time, for each G4PrimaryParticle ParticleInformation is created with a reference to the EDM's MCParticle. This can be used further eg. in the saving output tool.
+For each execution of the algorithm an EDM `MCParticleCollection` is translated into `G4Event` using the method `G4SimAlg::EDM2G4()`. At the translation time, for each `G4PrimaryParticle` `sim::ParticleInformation` is created with a reference to the EDM's `MCParticle`. This can be used further eg. in the saving output tool.
 
 A translated G4Event is passed to G4SimSvc and after the simulation is done, it is retrieved. Here all (if any) saving tools are called. Finally, an event is terminated.
 
 
 ### 4.2. Output
 
-Saving the output from a simulated G4Event is performed by tools deriving from an interface IG4SaveTool.
-Tools may have the outputs specified.
+Saving the output from a simulated G4Event is performed by tools deriving from an interface IG4SaveOutputTool.
+Tools may have the data outputs specified.
 A method ::SaveOutput(const G4Event &aEvent) is meant to retrieve any useful information and save it to EDM.
-Useful information means eg. hits collections (G4HCofThisEvent) or anything stored in an implementation of G4VUserEventInformation, G4VUserEventInformation, G4VUserTrackInformation, G4VUserPrimaryParticleInformation etc.
+Useful information means eg. hits collections (`G4HCofThisEvent`) or anything stored in an implementation of G4VUserEventInformation, G4VUserEventInformation, G4VUserTrackInformation, G4VUserPrimaryParticleInformation etc.
 
-Existing tools store hits collections from tracker detectors (G4SaveTrackerHits) or calorimeters (G4SaveCalHits).
+Existing tools store hits collections from the tracker detectors (`G4SaveTrackerHits`) or calorimeters (`G4SaveCalHits`).
 
-G4SaveTrackerHits stores trackClusters (EDM TrackClusterCollection), trackHits (EDM TrackHitCollection) and trackHitsClusters (EDM TrackClusterHitsAssociationCollection) for any hit collection with "Tracker" in its name.
+`G4SaveTrackerHits` stores **trackClusters** (EDM `TrackClusterCollection`), **trackHits** (EDM `TrackHitCollection`) and **trackHitsClusters** (EDM `TrackClusterHitsAssociationCollection`) for any hit collection with "Tracker" in its name. Collection name is specified by the readout name at the XML file. For instance, the collection below contains hits in the tracker ("CentralTracker_Readout") ([see more](#sensitive-detectors)):
 
-G4SaveCalHits takes a property "caloType" that can be either "ECal", "EMCal" or "HCal. It stores caloClusters (EDM CaloClusterCollection) and caloHits (EDM CaloHitCollection) for any hit collection with name that contains the string defined in "caloType" property.
+~~~{.xml}
+<readouts>
+  <readout name="CentralTracker_Readout">
+  ...
+  </readout>
+</readouts>
+~~~
 
-Hits collections' names are defined in DD4hep as readouts' names.
-For additional information about DD4hep see TODO.
-
-
-FAST SIM
-
-G4SaveSmearedParticles tool stores particles (EDM ParticleCollection) and particlesMCparticles (EDM ParticleMCParticleAssociationCollection). At the end of tracking information about the particles momenta, status and vertex position is stored in ParticleInformation (SaveParticlesUserAction::PostUserTrackingAction()). Particle Information contains as well the reference to the EDM MCParticle. Therefore, for each particle in the event, based on ParticleInformation, a EDM output is created (including the association between MCParticle and Particle).
-Those particles may be treated as 'reconstructed' particles. 'Reconstructed' in this case means the particles have undergone simulation process and the resulting (final) changes to the momentum are taken into account. At this stage it does not involve any reconstruction process.
-
+`G4SaveCalHits` tool is more general in a sense that it should describe both hits collections in the electromagetic and hadronic calorimeters. Hence, it takes a property **caloType** that can be either "ECal" (or "EMCal") or "HCal". It stores **caloClusters** (EDM `CaloClusterCollection`) and **caloHits** (EDM `CaloHitCollection`) for any hit collection with name that contains the string defined in **caloType** property.
 
 5. Units
 -----
 
 Important aspect of the translations between HepMC, EDM and Geant4 are the units. Since each framework uses by default different units, every translation should take that into account.
 
-Conversions between EDM and Geant4 are specified in FCCSW/GeantSim/GeantGeneral/GeantGeneral/Units.h.
+Conversions between EDM and Geant4 are specified in sim::Units.
 
 Conversions between EDM and HepMC depend on the units used by HepMC input file (changes from file to file) and is therefore handled separately in HepMCConverter class.
