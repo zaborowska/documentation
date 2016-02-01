@@ -102,11 +102,9 @@ Geant main manager class is `G4RunManager`. It has own implementation in FCCSW `
 The main simulation service `G4SimSvc` owns `sim::RunManager` and controls the communication between GAUDI and Geant (`sim::RunManager`).
 
 Necessary information about the simulation that needs to be given:
-* detector geometry
-* physics list describing all the particles that can be created in the simulation and all the processes they may encounter
-* additional requirements (so-called user actions)
-
-All those may be set by Gaudi Tools in a job configuration file. Tools need to derive from interfaces (respectively): `IG4DetectorConstruction`, `IG4PhysicsList` and `IG4ActionTool`.
+* detector geometry (`IG4DetectorConstruction` tool)
+* physics list describing all the particles that can be created in the simulation and all the processes they may encounter (`IG4PhysicsList` tool)
+* additional requirements (so-called user actions) (`IG4ActionTool`)
 
 This service is also passing events (`G4Event`) to and from Geant.
 
@@ -114,9 +112,9 @@ This service is also passing events (`G4Event`) to and from Geant.
 
 The main simulation algorithm communicates with `G4SimSvc` in each event loop execution.
 It is responsible for the translation of the EDM event (`MCParticleCollection`) to `G4Event`, passing it to be simulated and retrieving it afterwards.
-Retrieved `G4Event` contains the very same primary particles and vertices, though it also contains hits collections and various information. In particular, user may implement `G4VUserEventInformation`, `G4VUserTrackInformation` etc.
-To enable a flexible setting of what should be saved from an event, it may be specified in a tool derived from `IG4SaveOutputTool`. Currently there are `G4SaveTrackerHits` and `G4SaveCalHits` tools.
-A property `outputs` of `G4SimAlg` takes a list of strings with the tool names.
+
+Retrieved `G4Event` contains the very same primary particles and vertices, though it also contains hits collections and various information. To enable a flexible setting of what should be saved from an event, it may be specified in a tool derived from `IG4SaveOutputTool`.
+A property **outputs** of `G4SimAlg` takes a list of strings with those tool names.
 Those tools should declare the output that is supposed to be further stored by the algorithm `PodioOutput`.
 
 ### 1.3. Simulation package in FCCSW
@@ -349,7 +347,8 @@ Any user action that derives from Geant4 interface can be implemented in Sim/Sim
 
 In order to invoke this action in the simulation, it should be created in the `FullSimActions::Build()` method.
 
-If one wants to use different sets of user actions without a need to recompile FCCSW, one may implement his own implementation of `GVUserActionInitialization`. In that case, a relevant GAUDI tool should be created, basing on `G4FullSimActions`. Its name should follow the convention of adding a prefix "G4" to the name of the class that it creates.
+However, if one uses interchangeably different 'sets' of user actions and do not want to recompile FCCSW with every change (addition/deletion) of user action in `FullSimActions`, it is possible to create another implementation(s) of `G4VUserActionInitialization`.
+In that case, a relevant GAUDI tool should be created, basing on `G4FullSimActions`. Its name should follow the convention of adding a prefix "G4" to the name of the class (implementation of `G4VUserActionInitialization` that it creates.
 ___
 
 ## 4. Simulation in GAUDI algorithm G4SimAlg
